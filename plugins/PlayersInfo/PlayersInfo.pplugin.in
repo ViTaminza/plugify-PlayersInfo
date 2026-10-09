@@ -1,0 +1,29 @@
+{
+	"$schema": "https://raw.githubusercontent.com/untrustedmodders/plugify/refs/heads/main/schemas/plugin.schema.json",
+	"version": "${PLAYERSINFO_VERSION}",
+	"name": "PlayersInfo",
+	"description": "Plugify port of the Metamod:Source plugin 'PlayersInfo' (the plugin that shipped as addons/PlayersInfo). Registers the server console command 'mm_getinfo', which prints one compact JSON document to the server console: the current map, both team scores and, for every connected player with a pawn, {death, headshots, kills, name, ping, playtime, prime, rank, steamid, team, userid}. The vcs2.ru web controller polls this over RCON. 'rank' comes from the levels_ranks plugin (optional dependency, key omitted without it), 'prime' from ISteamGameServer::UserHasLicenseForApp. No config file is read (the production playerinfo_settings.ini belongs to an older build, see BEHAVIOR.md).",
+	"author": "Pisex / ABKAM, ported to Plugify",
+	"website": "https://github.com/untrustedmodders/plugify",
+	"license": "GPL-3.0",
+	"entry": "bin/PlayersInfo",
+	"platforms": [],
+	"language": "cpp",
+	"dependencies": [
+		{
+			"name": "s2sdk",
+			"constraints": ">=2.18.2"
+		},
+		{
+			"name": "levels_ranks",
+			"constraints": ">=1.0.0",
+			"optional": true
+		},
+		{
+			"name": "hudmenu",
+			"constraints": ">=1.0.0",
+			"optional": true
+		}
+	],
+	"methods": []
+}
