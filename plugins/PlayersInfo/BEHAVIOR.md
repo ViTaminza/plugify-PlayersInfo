@@ -75,24 +75,59 @@ instead.
 
 ## Port
 
-`plugins/PlayersInfo` (manifest name `PlayersInfo`, the original `.vdf` alias and `.so` name):
+`plugins/PlayersInfo` (manifest name `PlayersInfo`, the original `.vdf` alias and `.so` name).
+Pure `s2sdk` (`docs/PLUGIN_STANDARD.md` §7): no `pisexcompat` and no guard library — the safety
+checks live in the plugin itself.
 
 * `src/plugin.cpp` — registers `mm_getinfo` as a `ConVarFlag::GameDll` console command with s2sdk
-  (`AddConsoleCommand`), hooks `player_connect`/`player_disconnect` through pisexcompat, builds the
-  same document with the same schema chain, prints it with `s2sdk::PrintToServer` (the same server
-  console channel as the original's `ConPrintf`).
+  (`AddConsoleCommand`), hooks `player_connect`/`player_disconnect` with
+  `s2sdk::HookEvent(..., HookMode::Pre)` and unhooks them in `OnPluginEnd`, builds the same document
+  with the same schema chain, prints it with `s2sdk::PrintToServer` (the same server console channel
+  as the original's `ConPrintf`, but split into token-aligned chunks - see
+  `src/console_output.hpp` below, because one ConMsg call truncates at 2047 bytes). The map gate (`OnMapStart`/`OnMapEnd` listeners + the first
+  `OnPluginUpdate` latch, `PITFALLS B1/B2`), the slot/client/controller checks (`C2`), the
+  map-gated schema offsets (`C8`), the event hooks (`C12`) and the wiring of the command lifecycle
+  (`C11`/`A7`, see below) are implemented there.
+* `src/map_gate.hpp` — the B1/B2 map readiness gate as an engine-free state machine, driven by the
+  s2sdk listeners and unit tested in `tests/PlayersInfo_tests.cpp`; every client, entity and schema
+  call is behind its `Ready()`.
+* `src/connection_times.hpp` — the original's `g_iConnection[64]` table (connect/disconnect by slot,
+  the once-only seeding for a plugin loaded mid-map), engine-free and unit tested.
+* `src/command_lifecycle.hpp` — the `mm_getinfo` registration and its symmetrical teardown
+  (`PITFALLS C11`/`A7`): s2sdk's `AddConsoleCommand` always attaches the callback and only reports
+  whether the engine command itself was created, so the plugin remembers that answer — `OnPluginEnd`
+  removes a command it created with `RemoveCommand`, only detaches its callback from one that already
+  existed (`RemoveCommandListener`, which leaves the other owner's command alone), and touches
+  nothing when the binding was missing. The server-console-only dispatch lives here too, and the
+  whole file is unit tested against fake `__s2sdk_*` command bindings.
+* `src/console_output.hpp` — the document printer. `s2sdk::PrintToServer` is `ConMsg("%s\n", …)`,
+  which truncates at 2047 bytes (live bug on 27035: 18 bots produced a 2047-byte truncated document
+  and the web poller's `json.loads` failed with EOF), so the document is printed in pieces of at
+  most 1800 bytes cut **only between JSON tokens** (after `,` `:` `{` `[` `}` `]` outside strings).
+  The newline each call appends is legal JSON whitespace, so an RCON client that concatenates the
+  lines parses one object; a document with a single indivisible token is replaced by one explicit
+  `{"error":"document too long"}` object, and a missing `PrintToServer` binding prints nothing.
+  Unit tested on synthetic 18- and 64-player documents (UTF-8, quotes, backslashes, commas inside
+  strings), with a fake binding and without it.
 * `src/json_writer.hpp` — compact nlohmann-compatible JSON (sorted keys, same escaping), unit
   tested byte for byte in `tests/PlayersInfo_tests.cpp`.
-* `src/steam_gameserver.{hpp,cpp}` — `ISteamGameServer` for `prime`, resolved through
-  `dlsym(RTLD_DEFAULT, "SteamInternal_ContextInit" / "SteamAPI_ISteamGameServer_…")` (the same
-  functions the original imported as undefined symbols); without them `prime` is `false`.
+* `src/ent_handle.hpp` — the entity-handle validity rule (`0`/`-1` mean "no entity", the sign is
+  meaningless), unit tested.
+* `src/steam_gameserver.{hpp,cpp}` — `ISteamGameServer` for `prime`, obtained through the official
+  flat accessor `SteamAPI_SteamGameServer_v015()` and called through
+  `SteamAPI_ISteamGameServer_UserHasLicenseForApp`, both resolved with `dlsym(RTLD_DEFAULT, …)`;
+  a missing symbol or an interface that is not up yet answers `-1` and `prime` is `false`.
+  **Never** `SteamInternal_ContextInit` with a caller-built context: its buffer is
+  `{callback, counter, pointer}` and the callback is called, so a zeroed buffer (the 1.1.0 bug that
+  crashed 27035 with SIGSEGV/RIP=0 on the first `mm_getinfo`) is a null function pointer.
+  Regression-tested in `tests/steamlink_tests.cpp` against a fake `dlsym()`.
 * `rank` uses the ported `levels_ranks` plugin's exported `GetClientInfo(slot, 1, false)`
   (optional dependency; the key is omitted when the plugin is absent, like the original with a
   null LR core).
 
 Deliberate differences: the original indexed `g_iConnection` with the raw event `userid` but read it
 by slot; in CS2 the event userid is not the slot (see `plugins/as_admin_time`), so the port
-translates it with `IGameEvent::GetPlayerSlot()` and keeps both sides slot-indexed. The document
+translates it with `s2sdk::GetEventPlayerSlot()` and keeps both sides slot-indexed. The document
 itself is byte-compatible apart from the trailing newline: s2sdk's `PrintToServer` is
 `ConMsg("%s\n", …)` while the original's `ConPrintf("%s", …)` appended nothing (a line break makes
 line-based RCON parsing easier and is ignored by JSON parsers).

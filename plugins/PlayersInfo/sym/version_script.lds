@@ -9,9 +9,8 @@
            module from the levels_ranks plugin's exported methods) */
         __levels_ranks_*;
 
-        /* hudmenu binding slots (defined by hudmenu_bindings through pisexcompat, filled by the
-           plugify module from the hudmenu plugin's exported methods) */
-        __hudmenu_*;
+        /* No exported methods of our own: PlayersInfo exposes nothing to other plugins.
+           No __hudmenu_* either - the plugin does not use pisexcompat menus (PLUGIN_STANDARD §7). */
 
     local: *;
 };
